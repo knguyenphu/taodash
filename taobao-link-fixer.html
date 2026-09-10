@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Taobao Link Fixer — Taobao Toolbox</title>
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <div class="top-nav">
+      <a class="back-link" href="../index.html">&larr; Agent Toolbox</a>
+    </div>
+
+    <h2 class="page-title">🔗 Taobao Link Fixer</h2>
+    <p class="page-sub">
+      Paste one or more Taobao / Tmall / world.taobao.com links (one per line). Each gets
+      converted to the canonical <code>item.taobao.com/item.htm?id=</code> link your
+      purchasing agent needs.
+    </p>
+
+    <div class="panel card">
+      <label class="field-label" for="input-links">Links to fix</label>
+      <textarea
+        id="input-links"
+        rows="5"
+        placeholder="https://world.taobao.com/item/cHN4ODNBL3pEb0svczBoRGgwNk1jZz09.htm"
+      ></textarea>
+
+      <div class="btn-row">
+        <button class="btn" id="fix-btn">Fix Link(s)</button>
+        <button class="btn secondary" id="clear-btn">Clear</button>
+      </div>
+
+      <p class="hint">
+        Links that already contain a plain numeric id (most <code>item.taobao.com</code> /
+        <code>detail.tmall.com</code> links) resolve instantly. Paste a
+        <code>world.taobao.com</code> link
+      </p>
+
+      <div id="results" class="results"></div>
+    </div>
+
+    <details class="history-section card panel" id="history-details">
+      <summary>History (<span id="history-count">0</span>)</summary>
+      <div class="btn-row" style="margin-top: 12px;">
+        <button class="btn secondary" id="clear-history-btn">Clear history</button>
+      </div>
+      <div id="history-list" class="history-list"></div>
+    </details>
+
+    <footer class="page-footer">
+      Agent Toolbox · Taobao Link Fixer
+    </footer>
+  </div>
+
+  <script src="../assets/js/taobao-fixer.js"></script>
+  <script>
+    const HISTORY_KEY = "agent-toolbox.taobao-fixer.history";
+    const MAX_HISTORY = 50;
+
+    const inputEl = document.getElementById("input-links");
+    const fixBtn = document.getElementById("fix-btn");
+    const clearBtn = document.getElementById("clear-btn");
+    const resultsEl = document.getElementById("results");
+    const historyListEl = document.getElementById("history-list");
+    const historyCountEl = document.getElementById("history-count");
+    const clearHistoryBtn = document.getElementById("clear-history-btn");
+
+    function loadHistory() {
+      try {
+        return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function saveHistory(entries) {
+      try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(entries.slice(0, MAX_HISTORY)));
+      } catch (e) {
+        // localStorage unavailable (private browsing etc.) — fail silently
+      }
+    }
+
+    function addToHistory(entry) {
+      const entries = loadHistory();
+      entries.unshift({ ...entry, ts: Date.now() });
+      saveHistory(entries);
+      renderHistory();
+    }
+
+    function renderHistory() {
+      const entries = loadHistory();
+      historyCountEl.textContent = entries.length;
+      if (!entries.length) {
+        historyListEl.innerHTML = `<p class="hint">No links fixed yet.</p>`;
+        return;
+      }
+      historyListEl.innerHTML = entries
+        .map((e) => {
+          const date = new Date(e.ts).toLocaleString();
+          return `
+          <div class="history-row">
+            <span>
+              <code>${e.fixedUrl}</code>
+              <div class="meta">${date} · ${e.method === "fetched" ? `resolved via ${e.via || "proxy"}` : "direct"}</div>
+            </span>
+            <button class="copy-btn" data-copy="${e.fixedUrl}">Copy</button>
+          </div>`;
+        })
+        .join("");
+    }
+
+    function copyToClipboard(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+      } else {
+        fallbackCopy(text);
+      }
+    }
+
+    function fallbackCopy(text) {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+      } catch (e) {}
+      document.body.removeChild(ta);
+    }
+
+    function renderResultRow({ original, fixedUrl, method, via, error }) {
+      const row = document.createElement("div");
+      row.className = `result-row ${error ? "err" : "ok"}`;
+
+      if (error) {
+        row.innerHTML = `
+          <div class="result-original">${original}</div>
+          <div class="result-fixed">
+            <span class="result-status">✕ Failed</span>
+            <span>${error}</span>
+          </div>`;
+      } else {
+        const methodLabel = method === "fetched" ? `Resolved via ${via || "proxy"}` : "Direct";
+        row.innerHTML = `
+          <div class="result-original">${original}</div>
+          <div class="result-fixed">
+            <span class="result-status">✓ ${methodLabel}</span>
+            <code>${fixedUrl}</code>
+            <button class="copy-btn" data-copy="${fixedUrl}">Copy</button>
+          </div>`;
+      }
+      return row;
+    }
+
+    async function handleFix() {
+      const lines = inputEl.value
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean);
+
+      if (!lines.length) return;
+
+      fixBtn.disabled = true;
+      fixBtn.textContent = "Fixing…";
+      resultsEl.innerHTML = "";
+
+      for (const line of lines) {
+        const row = renderResultRow({ original: line, fixedUrl: "Resolving…" });
+        row.classList.remove("ok", "err");
+        resultsEl.appendChild(row);
+
+        try {
+          const result = await fixTaobaoLink(line);
+          const finished = renderResultRow({ original: line, ...result });
+          resultsEl.replaceChild(finished, row);
+          addToHistory({ original: line, ...result });
+        } catch (err) {
+          const finished = renderResultRow({ original: line, error: err.message });
+          resultsEl.replaceChild(finished, row);
+        }
+      }
+
+      fixBtn.disabled = false;
+      fixBtn.textContent = "Fix Link(s)";
+    }
+
+    resultsEl.addEventListener("click", (e) => {
+      if (e.target.matches(".copy-btn")) copyToClipboard(e.target.dataset.copy);
+    });
+    historyListEl.addEventListener("click", (e) => {
+      if (e.target.matches(".copy-btn")) copyToClipboard(e.target.dataset.copy);
+    });
+
+    fixBtn.addEventListener("click", handleFix);
+    clearBtn.addEventListener("click", () => {
+      inputEl.value = "";
+      resultsEl.innerHTML = "";
+    });
+    clearHistoryBtn.addEventListener("click", () => {
+      saveHistory([]);
+      renderHistory();
+    });
+
+    renderHistory();
+  </script>
+</body>
+</html>
