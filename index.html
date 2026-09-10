@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agent Toolbox</title>
+  <link rel="stylesheet" href="assets/css/style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <div class="top-nav">
+      <div class="brand">
+        <h1>🧰 Agent Toolbox</h1>
+        <span class="tag">personal utilities</span>
+      </div>
+    </div>
+
+    <h2 class="page-title">Tools</h2>
+    <p class="page-sub">
+      A growing collection of small utilities. Pick one below — new tools get added here as they're built.
+    </p>
+
+    <div id="tool-grid" class="tool-grid"></div>
+
+    <footer class="page-footer">
+      Agent Toolbox · hosted on GitHub Pages · add new tools by editing <code>assets/js/registry.js</code>
+    </footer>
+  </div>
+
+  <script src="assets/js/registry.js"></script>
+  <script>
+    const grid = document.getElementById("tool-grid");
+
+    if (!TOOLS.length) {
+      grid.innerHTML = `<div class="empty-state card">No tools yet — add one to assets/js/registry.js</div>`;
+    } else {
+      grid.innerHTML = TOOLS.map(
+        (tool) => `
+        <a class="tool-card card" href="${tool.url}">
+          <span class="icon">${tool.icon || "🧩"}</span>
+          <h3>${tool.name}</h3>
+          <p>${tool.description}</p>
+          <div class="tags">
+            ${(tool.tags || []).map((t) => `<span>${t}</span>`).join("")}
+          </div>
+        </a>`
+      ).join("");
+    }
+  </script>
+</body>
+</html>
