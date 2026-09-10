@@ -41,18 +41,31 @@ Taobao/Tmall links show up in a few shapes:
 - `item.taobao.com/item.htm?id=925435367253` — already correct, used as-is.
 - `detail.tmall.com/item.htm?id=925435367253` — same `id` param, just re-based to
   `item.taobao.com`.
-- `world.taobao.com/item/<opaque-token>.htm` — the cross-border storefront. The token in the
-  URL is **not** a reversible encoding of the numeric item id (it's an internal opaque
-  slug), so it can't be decoded client-side from the URL alone.
+- `world.taobao.com/item/<opaque-token>.htm` — the cross-border storefront. The token is
+  **encrypted**, not just encoded: decoding it as base64 twice yields 16 raw bytes with no
+  readable structure — exactly the size of one AES block. Alibaba's frontend/backend hold
+  the key; there is no client-side math that reverses it, so it cannot be decoded from the
+  URL alone, no matter how it's parsed.
 
-For that last case, the tool fetches the live page through a public CORS proxy
-(`corsproxy.io`, falling back to `allorigins.win`) and reads the real
+For that last case, the tool instead fetches the *live page* — where Taobao's own code has
+already decrypted the token server-side — and reads the real
 `item.taobao.com/item.htm?id=...` link that the storefront page always embeds internally
 (for its own tracking/cross-links). This step only works once the site is served over
 `http(s)` — e.g. after you've pushed it to GitHub Pages — not when opening `index.html`
 directly from disk.
 
-If both proxies are down or blocked, the tool reports a failure rather than guessing — at
+The fetch goes through **r.jina.ai** (Jina AI's "Reader" API — built for fetching pages for
+LLM consumption, and the only option tested that reliably gets through Alibaba's
+anti-scraping without being blocked), with `api.allorigins.win` and `api.codetabs.com` as
+last-resort fallbacks. Free use of r.jina.ai is rate-limited; if you fix links often enough
+to hit that limit, get a free key at [jina.ai](https://jina.ai) and add it in
+`assets/js/taobao-fixer.js`:
+
+```js
+init: { headers: { "X-Return-Format": "html", "Authorization": "Bearer <your-key>" } },
+```
+
+If all proxies are down or blocked, the tool reports a failure rather than guessing — at
 that point the fallback is to open the link yourself and copy the id out of the page (the
 same `item.taobao.com/item.htm?id=` link is usually visible in the page's "buy" / "cart"
 buttons).

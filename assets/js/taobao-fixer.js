@@ -11,19 +11,51 @@
  *   1. Try to pull a numeric id straight out of the URL (query param or path). Cheap,
  *      works for the majority of link shapes, no network call.
  *   2. If that fails (the world.taobao.com opaque-token case), fetch the live page
- *      through a public CORS proxy and regex the real item.taobao.com link out of the
- *      rendered HTML — the storefront always embeds it for tracking/cross-links.
+ *      through a read-through proxy and regex the real item.taobao.com link out of the
+ *      HTML — the storefront always embeds it internally for tracking/cross-links.
  *
  * Step 2 only works once this page is actually served over http(s) (e.g. GitHub Pages),
  * since it needs cross-origin fetch. It will not work from a `file://` page.
+ *
+ * Proxy notes (as of testing in Sept 2026):
+ *   - corsproxy.io now requires a paid API key for server-to-server fetches — dropped.
+ *   - api.allorigins.win / api.codetabs.com either time out or get blocked specifically
+ *     when the target is world.taobao.com (Alibaba's anti-scraping appears to block their
+ *     server IPs), even though they work fine against ordinary sites. Kept as last-resort
+ *     fallbacks in case that changes.
+ *   - r.jina.ai (Jina AI's "Reader" API, meant for fetching pages for LLM consumption)
+ *     reliably got through and is used as the primary proxy. It's free without a key at
+ *     a modest rate limit; see README for how to add a free API key if you hit that limit.
  */
 
 const CANONICAL_BASE = "https://item.taobao.com/item.htm?id=";
 
 // Tried in order; first one that returns a usable id wins.
-const CORS_PROXIES = [
-  (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
-  (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+const PROXIES = [
+  {
+    name: "jina",
+    request: (url) => ({
+      url: `https://r.jina.ai/${url}`,
+      init: { headers: { "X-Return-Format": "html" } },
+    }),
+    timeoutMs: 15000,
+  },
+  {
+    name: "allorigins",
+    request: (url) => ({
+      url: `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+      init: {},
+    }),
+    timeoutMs: 20000,
+  },
+  {
+    name: "codetabs",
+    request: (url) => ({
+      url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+      init: {},
+    }),
+    timeoutMs: 20000,
+  },
 ];
 
 const ID_PATTERNS_IN_HTML = [
@@ -51,20 +83,21 @@ function extractIdFromUrlDirect(rawUrl) {
   return null;
 }
 
-/** Fetch the page through a CORS proxy and pull the id out of the embedded links/JSON. */
-async function extractIdViaFetch(rawUrl, { timeoutMs = 12000 } = {}) {
-  for (const buildProxyUrl of CORS_PROXIES) {
+/** Fetch the page through each proxy in turn and pull the id out of the HTML/JSON. */
+async function extractIdViaFetch(rawUrl) {
+  for (const proxy of PROXIES) {
+    const { url, init } = proxy.request(rawUrl);
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      const resp = await fetch(buildProxyUrl(rawUrl), { signal: controller.signal });
+      const timer = setTimeout(() => controller.abort(), proxy.timeoutMs);
+      const resp = await fetch(url, { ...init, signal: controller.signal });
       clearTimeout(timer);
       if (!resp.ok) continue;
 
       const html = await resp.text();
       for (const pattern of ID_PATTERNS_IN_HTML) {
         const match = html.match(pattern);
-        if (match) return match[1];
+        if (match) return { id: match[1], proxy: proxy.name };
       }
     } catch (e) {
       // try next proxy
@@ -86,12 +119,17 @@ async function fixTaobaoLink(rawUrl) {
     return { id: directId, fixedUrl: CANONICAL_BASE + directId, method: "direct" };
   }
 
-  const fetchedId = await extractIdViaFetch(trimmed);
-  if (fetchedId) {
-    return { id: fetchedId, fixedUrl: CANONICAL_BASE + fetchedId, method: "fetched" };
+  const fetched = await extractIdViaFetch(trimmed);
+  if (fetched) {
+    return {
+      id: fetched.id,
+      fixedUrl: CANONICAL_BASE + fetched.id,
+      method: "fetched",
+      via: fetched.proxy,
+    };
   }
 
   throw new Error(
-    "Couldn't find an item id — the page may block the CORS proxy. Try opening the link and copying the item id manually."
+    "Couldn't find an item id — all proxies failed or were blocked. Try opening the link and copying the item id manually."
   );
 }

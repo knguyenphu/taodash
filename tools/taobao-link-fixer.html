@@ -106,7 +106,7 @@
           <div class="history-row">
             <span>
               <code>${e.fixedUrl}</code>
-              <div class="meta">${date} · ${e.method === "fetched" ? "resolved via proxy" : "direct"}</div>
+              <div class="meta">${date} · ${e.method === "fetched" ? `resolved via ${e.via || "proxy"}` : "direct"}</div>
             </span>
             <button class="copy-btn" data-copy="${e.fixedUrl}">Copy</button>
           </div>`;
@@ -135,7 +135,7 @@
       document.body.removeChild(ta);
     }
 
-    function renderResultRow({ original, fixedUrl, method, error }) {
+    function renderResultRow({ original, fixedUrl, method, via, error }) {
       const row = document.createElement("div");
       row.className = `result-row ${error ? "err" : "ok"}`;
 
@@ -147,10 +147,11 @@
             <span>${error}</span>
           </div>`;
       } else {
+        const methodLabel = method === "fetched" ? `Resolved via ${via || "proxy"}` : "Direct";
         row.innerHTML = `
           <div class="result-original">${original}</div>
           <div class="result-fixed">
-            <span class="result-status">✓ ${method === "fetched" ? "Resolved via proxy" : "Direct"}</span>
+            <span class="result-status">✓ ${methodLabel}</span>
             <code>${fixedUrl}</code>
             <button class="copy-btn" data-copy="${fixedUrl}">Copy</button>
           </div>`;
